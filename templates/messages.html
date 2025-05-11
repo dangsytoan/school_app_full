@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Tin nhắn - Hệ thống Liên lạc{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Tin nhắn</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">Quay lại Dashboard</a>
+</div>
+
+
+<div class="row">
+    <div class="col-md-8">
+        <h4>Hộp thư của {{ current_user_hoten }}</h4>
+        <div class="card" style="max-height: 400px; overflow-y: auto;">
+            <div class="card-body">
+                {% if messages %}
+                    {% for m in messages %}
+                    <div class="message-bubble {% if m.from_user == current_user_username %}sent{% else %}received{% endif %}">
+                        {% if m.from_user == current_user_username %}
+                            <strong>Bạn gửi đến {{ get_user_details(m.to_user).hoten if get_user_details(m.to_user) else m.to_user }}:</strong>
+                        {% else %}
+                            <strong>{{ get_user_details(m.from_user).hoten if get_user_details(m.from_user) else m.from_user }} gửi đến bạn:</strong>
+                        {% endif %}
+                        <p class="mb-0">{{ m.content }}</p>
+                        <div class="message-meta text-right">{{ m.timestamp }}</div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                <p class="text-muted">Không có tin nhắn nào.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <h4>Gửi tin nhắn mới</h4>
+        <div class="card">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="form-group">
+                        <label for="to_user">Người nhận:</label>
+                        <select name="to_user" id="to_user" class="form-control custom-select" required>
+                            <option value="" disabled selected>-- Chọn người nhận --</option>
+                            {% for u_details in users_for_messaging %}
+                            <option value="{{ u_details.username }}">{{ u_details.hoten }} ({{u_details.username}})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="content_msg">Nội dung:</label>
+                        <textarea name="content" id="content_msg" class="form-control" placeholder="Nội dung tin nhắn" required rows="5"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Gửi tin nhắn</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

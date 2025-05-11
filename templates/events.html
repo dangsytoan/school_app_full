@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Sự kiện & Thông báo - Hệ thống Liên lạc{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Sự kiện và Thông báo</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">Quay lại Dashboard</a>
+</div>
+
+<div class="row">
+    <div class="col-md-{% if role in ['giaovien', 'truong'] %}8{% else %}12{% endif %}">
+        <h4>Danh sách sự kiện/thông báo</h4>
+        {% if events %}
+            {% for e in events %}
+            <div class="card mb-3">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                    <strong>{{ e.title }}</strong>
+                    <span class="badge badge-info">{{ e.type | capitalize }}</span>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">{{ e.description }}</p>
+                    {% if e.type in ['khenthuong', 'kyluat'] and e.student_username %}
+                    <p class="card-text font-italic">
+                        Học sinh: {{ get_user_details(e.student_username).hoten if get_user_details(e.student_username) else e.student_username }}
+                        {% if e.class_name %}(Lớp: {{ e.class_name }}){% endif %}
+                    </p>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-muted d-flex justify-content-between">
+                    <span>Ngày: {{ e.date }}</span>
+                    <span>Đăng bởi: {{ get_user_details(e.created_by).hoten if get_user_details(e.created_by) else e.created_by }} lúc {{ e.timestamp.split(' ')[1] if e.timestamp else '' }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info">Chưa có sự kiện hoặc thông báo nào.</div>
+        {% endif %}
+    </div>
+
+    {% if role in ['giaovien', 'truong'] %}
+    <div class="col-md-4">
+        <h4>Thêm mới</h4>
+        <div class="card">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="form-group">
+                        <label for="title">Tiêu đề:</label>
+                        <input type="text" id="title" name="title" class="form-control" placeholder="Tiêu đề sự kiện/thông báo" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="date">Ngày diễn ra/Ngày thông báo:</label>
+                        <input type="date" id="date" name="date" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="description">Nội dung:</label>
+                        <textarea name="description" id="description" class="form-control" placeholder="Nội dung chi tiết" required rows="4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="event_type">Loại:</label>
+                        <select name="event_type" id="event_type" class="form-control custom-select" onchange="toggleStudentInput(this.value)">
+                            <option value="event">Sự kiện chung</option>
+                            <option value="thongbao_chung">Thông báo chung</option>
+                            <option value="khenthuong">Thông báo Khen thưởng</option>
+                            <option value="kyluat">Thông báo Kỷ luật</option>
+                        </select>
+                    </div>
+                    <div id="student_info_div" style="display:none;">
+                        <div class="form-group">
+                            <label for="student_username">Chọn học sinh (nếu là Khen thưởng/Kỷ luật):</label>
+                            <select name="student_username" id="student_username" class="form-control custom-select">
+                                <option value="">-- Chọn học sinh (nếu có) --</option>
+                                {% for student in students %}
+                                <option value="{{ student.username }}">{{ student.hoten }} ({{ student.username }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="class_name">Lớp (tùy chọn):</label>
+                            <input type="text" name="class_name" id="class_name" class="form-control" placeholder="Ví dụ: 10A1">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-success btn-block">Thêm</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    function toggleStudentInput(eventType) {
+        var studentDiv = document.getElementById('student_info_div');
+        if (eventType === 'khenthuong' || eventType === 'kyluat') {
+            studentDiv.style.display = 'block';
+        } else {
+            studentDiv.style.display = 'none';
+        }
+    }
+    // Initialize on page load based on current selection (if any)
+    document.addEventListener('DOMContentLoaded', function() {
+        var eventTypeSelect = document.getElementById('event_type');
+        if (eventTypeSelect) {
+             toggleStudentInput(eventTypeSelect.value);
+        }
+    });
+</script>
+{% endblock %}

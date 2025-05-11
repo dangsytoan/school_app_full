@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Đơn từ & Kiến nghị - Hệ thống Liên lạc{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Đơn từ và Kiến nghị</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">Quay lại Dashboard</a>
+</div>
+
+{% if requests_data %}
+    {% for req in requests_data %}
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>
+                Đơn từ Phụ huynh: <strong>{{ get_user_details(req.from_user).hoten if get_user_details(req.from_user) else req.from_user }}</strong>
+                {% if req.student_username %}
+                    cho HS: <strong>{{ get_user_details(req.student_username).hoten if get_user_details(req.student_username) else req.student_username }}</strong>
+                    {% set student_details = get_user_details(req.student_username) %}
+                    {% if student_details and student_details.lop %} (Lớp: {{ student_details.lop }}) {% endif %}
+                {% endif %}
+            </span>
+            <span class="badge
+                {% if req.status == 'Chưa xử lý' %}badge-warning
+                {% elif req.status == 'Đang xử lý' %}badge-info
+                {% elif req.status == 'Đã duyệt' %}badge-success
+                {% elif req.status == 'Đã từ chối' %}badge-danger
+                {% else %}badge-secondary
+                {% endif %}
+            ">{{ req.status }}</span>
+        </div>
+        <div class="card-body">
+            <p class="card-text"><strong>Nội dung:</strong> {{ req.content }}</p>
+            <p class="card-text"><small class="text-muted">Ngày gửi: {{ req.timestamp }}</small></p>
+
+            {% if req.reply or (role in ['giaovien', 'truong'] and req.status == 'Chưa xử lý') or (role in ['giaovien', 'truong'] and req.status == 'Đang xử lý') %}
+            <hr>
+            <h5>Phản hồi:</h5>
+            {% if req.reply %}
+                <p class="card-text">{{ req.reply }}</p>
+                {% if req.handler %}
+                <p><small class="text-muted">Người xử lý: {{ get_user_details(req.handler).hoten if get_user_details(req.handler) else req.handler }} lúc {{ req.handler_timestamp }}</small></p>
+                {% endif %}
+            {% else %}
+                <p class="text-muted"><em>Chưa có phản hồi.</em></p>
+            {% endif %}
+
+            {% if role in ['giaovien', 'truong'] and (req.status == 'Chưa xử lý' or req.status == 'Đang xử lý') %}
+            <button class="btn btn-sm btn-outline-primary mt-2" type="button" data-toggle="collapse" data-target="#replyForm_{{ req.id }}" aria-expanded="false" aria-controls="replyForm_{{ req.id }}">
+                {% if req.status == 'Chưa xử lý' %}Phản hồi / Xử lý{% else %}Cập nhật xử lý{% endif %}
+            </button>
+            <div class="collapse mt-3" id="replyForm_{{ req.id }}">
+                <form method="POST">
+                    <input type="hidden" name="req_id" value="{{ req.id }}">
+                    <div class="form-group">
+                        <label for="reply_{{req.id}}">Nội dung phản hồi (nếu có):</label>
+                        <textarea name="reply" id="reply_{{req.id}}" class="form-control" placeholder="Nhập nội dung phản hồi..." rows="3">{{ req.reply if req.reply }}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="status_{{req.id}}">Cập nhật trạng thái:</label>
+                        <select name="status" id="status_{{req.id}}" class="form-control custom-select" required>
+                            <option value="Đang xử lý" {% if req.status == 'Đang xử lý' or req.status == 'Chưa xử lý' %}selected{% endif %}>Đang xử lý</option>
+                            <option value="Đã duyệt" {% if req.status == 'Đã duyệt' %}selected{% endif %}>Đã duyệt</option>
+                            <option value="Đã từ chối" {% if req.status == 'Đã từ chối' %}selected{% endif %}>Đã từ chối</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-success">Gửi phản hồi & Cập nhật</button>
+                </form>
+            </div>
+            {% endif %} {# End if role for form #}
+            {% endif %} {# End if reply or can reply #}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="alert alert-info">Chưa có đơn từ hoặc kiến nghị nào.</div>
+{% endif %}
+
+
+{% if role == 'phuhuynh' %}
+  <hr class="my-4">
+  <h4>Gửi kiến nghị mới</h4>
+  <div class="card">
+    <div class="card-body">
+        <form method="POST">
+            <div class="form-group">
+                <label for="student_username_req">Gửi cho con:</label>
+                <select name="student_username" id="student_username_req" class="form-control custom-select" required>
+                    <option value="" disabled selected>-- Chọn học sinh --</option>
+                    {% for child in children_list %}
+                    <option value="{{ child.username }}">{{ child.hoten }} ({{ child.username }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="content_req">Nội dung kiến nghị:</label>
+                <textarea name="content" id="content_req" class="form-control" placeholder="Trình bày rõ nội dung kiến nghị của bạn..." required rows="5"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Gửi kiến nghị</button>
+        </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

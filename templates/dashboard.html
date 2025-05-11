@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Bảng điều khiển - {{ session.user_hoten }}{% endblock %}
+
+{% block content %}
+<div class="jumbotron p-4 p-md-5 text-dark rounded bg-light">
+    <div class="col-md-8 px-0">
+        <h1 class="display-5 font-italic">Chào mừng, {{ session.user_hoten }}!</h1>
+        <p class="lead my-3">Đây là trang tổng quan cá nhân của bạn trong Hệ thống Liên lạc Trường Học.
+            {% if user_details %}
+                <br>Vai trò hiện tại: <strong>{{ session.role | capitalize }}</strong>.
+                {% if user_details.role == 'giaovien' and user_details.lop_chunhiem %}
+                    <br>Bạn là giáo viên chủ nhiệm lớp: <strong>{{ user_details.lop_chunhiem }}</strong>.
+                {% elif user_details.role == 'hocsinh' and user_details.lop %}
+                    <br>Bạn là học sinh lớp: <strong>{{ user_details.lop }}</strong>.
+                {% endif %}
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<h3 class="mt-4 mb-3">Các chức năng chính:</h3>
+<div class="row">
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Tin nhắn</h5>
+                <p class="card-text">Gửi và nhận tin nhắn với các thành viên khác trong hệ thống.</p>
+                <a href="{{ url_for('messages_route') }}" class="btn btn-primary">Đi đến Tin nhắn</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Sự kiện & Thông báo</h5>
+                <p class="card-text">Xem các sự kiện, lịch học, lịch thi và thông báo từ nhà trường.</p>
+                <a href="{{ url_for('events_route') }}" class="btn btn-primary">Xem Sự kiện</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Kết quả học tập</h5>
+                <p class="card-text">Theo dõi điểm số và kết quả học tập của {% if session.role == 'phuhuynh'%}con em.{% else %}bản thân.{% endif %}</p>
+                <a href="{{ url_for('grades_route') }}" class="btn btn-primary">Xem Điểm số</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Đơn từ / Kiến nghị</h5>
+                <p class="card-text">
+                    {% if session.role == 'phuhuynh'%}
+                        Gửi các đơn từ, kiến nghị đến nhà trường và theo dõi phản hồi.
+                    {% else %}
+                        Xem và xử lý các đơn từ, kiến nghị.
+                    {% endif %}
+                </p>
+                <a href="{{ url_for('requests_view_route') }}" class="btn btn-primary">Quản lý Đơn từ</a>
+            </div>
+        </div>
+    </div>
+    {% if session.role in ['giaovien', 'truong'] %}
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Thống kê</h5>
+                <p class="card-text">Xem các số liệu thống kê tổng quan của hệ thống.</p>
+                <a href="{{ url_for('statistics') }}" class="btn btn-info">Xem Thống kê</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

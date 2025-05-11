@@ -1,125 +1,155 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-import json
 import os
 from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import func
+import json
 
 app = Flask(__name__)
-app.secret_key = 'your_very_secret_key_123' # Thay đổi key này!
+app.secret_key = 'your_very_secret_key_123' 
 
-DATA_FILE = 'data.json'
+# Cấu hình SQLAlchemy
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(BASE_DIR, 'school_data.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# --- Định nghĩa Models ---
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    role = db.Column(db.String(20), nullable=False)
+    password_hash = db.Column(db.String(120))
+    hoten = db.Column(db.String(100), nullable=False)
+    lop_chunhiem = db.Column(db.String(10))
+    lop = db.Column(db.String(10))
+    children_usernames = db.Column(db.String(255))
+
+    sent_messages = db.relationship('Message', foreign_keys='Message.from_user_id', backref='sender', lazy='dynamic')
+    received_messages = db.relationship('Message', foreign_keys='Message.to_user_id', backref='recipient', lazy='dynamic')
+
+    created_events = db.relationship('Event', foreign_keys='Event.created_by_id', backref='creator', lazy=True)
+
+    sent_requests = db.relationship('Request', foreign_keys='Request.from_user_id', backref='request_sender', lazy='dynamic')
+    handled_requests = db.relationship('Request', foreign_keys='Request.handler_id', backref='request_handler', lazy='dynamic')
+
+    # Quan hệ cho khen thưởng/kỷ luật (khi User này là người quyết định)
+    disciplinary_decisions = db.relationship(
+        'DisciplinaryReward',
+        foreign_keys='DisciplinaryReward.decision_maker_id', 
+        backref='decision_maker_user',
+        lazy='dynamic'
+    )
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+    def get_children(self):
+        if self.role == 'phuhuynh' and self.children_usernames:
+            return User.query.filter(User.username.in_(self.children_usernames.split(','))).all()
+        return []
+
+class Message(db.Model):
+    __tablename__ = 'messages'
+    id = db.Column(db.Integer, primary_key=True)
+    from_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    read = db.Column(db.Boolean, default=False)
+
+    def __repr__(self):
+        return f'<Message {self.id}>'
+
+class Event(db.Model):
+    __tablename__ = 'events'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    type = db.Column(db.String(50), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    student_username = db.Column(db.String(80))
+    class_name = db.Column(db.String(10))
+
+    def __repr__(self):
+        return f'<Event {self.title}>'
+
+class Grade(db.Model):
+    __tablename__ = 'grades'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subject = db.Column(db.String(100), nullable=False)
+    score = db.Column(db.Float, nullable=False)
+
+    student = db.relationship('User', foreign_keys=[student_id], backref=db.backref('grades', lazy='dynamic')) 
+
+    __table_args__ = (db.UniqueConstraint('student_id', 'subject', name='_student_subject_uc'),)
+
+    def __repr__(self):
+        return f'<Grade {self.student.username if self.student else self.student_id} - {self.subject}: {self.score}>'
+
+
+class Request(db.Model):
+    __tablename__ = 'requests'
+    id = db.Column(db.Integer, primary_key=True)
+    from_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(50), default="Chưa xử lý")
+    reply = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    handler_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    handler_timestamp = db.Column(db.DateTime)
+
+    student = db.relationship('User', foreign_keys=[student_id], backref=db.backref('related_requests', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<Request {self.id}>'
+
+class DisciplinaryReward(db.Model):
+    __tablename__ = 'disciplinary_rewards'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False) # User là học sinh
+    type = db.Column(db.String(20), nullable=False) # khenthuong, kyluat
+    reason = db.Column(db.Text, nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    decision_maker_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False) # User là người ra quyết định
+
+    student = db.relationship('User', foreign_keys=[student_id], backref=db.backref('disciplinary_records', lazy='dynamic')) # CHỈ ĐỊNH RÕ foreign_keys
+    # backref 'decision_maker_user' được tạo từ User.disciplinary_decisions
+
+    def __repr__(self):
+        return f'<DisciplinaryReward {self.type} for student_id {self.student_id}>'
+
+# --- Kết thúc định nghĩa Models ---
 
 @app.context_processor
 def inject_now():
     return {'now': datetime.utcnow()}
 
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        # Tạo file data.json mẫu nếu chưa có
-        sample_data = {
-            "users": [
-                {"username": "bgh_hieu_truong", "role": "truong", "password_hash": "admin_pwd", "hoten": "Thầy Hiệu Trưởng", "lop_chunhiem": null},
-                {"username": "gv_toan_thay_hung", "role": "giaovien", "password_hash": "gv_pwd", "hoten": "Thầy Mạnh Hùng", "lop_chunhiem": "10A1"},
-                {"username": "gv_van_co_mai", "role": "giaovien", "password_hash": "gv_pwd", "hoten": "Cô Thanh Mai", "lop_chunhiem": "11B2"},
-                {"username": "gv_anh_co_lan", "role": "giaovien", "password_hash": "gv_pwd", "hoten": "Cô Ngọc Lan", "lop_chunhiem": "12C3"},
-                {"username": "hs_an_nguyen", "role": "hocsinh", "password_hash": "hs_pwd", "hoten": "Nguyễn Văn An", "lop": "10A1"},
-                {"username": "hs_binh_le", "role": "hocsinh", "password_hash": "hs_pwd", "hoten": "Lê Thị Bình", "lop": "10A1"},
-                {"username": "hs_chi_tran", "role": "hocsinh", "password_hash": "hs_pwd", "hoten": "Trần Minh Chi", "lop": "11B2"},
-                {"username": "hs_dung_pham", "role": "hocsinh", "password_hash": "hs_pwd", "hoten": "Phạm Tuấn Dũng", "lop": "11B2"},
-                {"username": "hs_giang_hoang", "role": "hocsinh", "password_hash": "hs_pwd", "hoten": "Hoàng Thu Giang", "lop": "12C3"},
-                {"username": "hs_khanh_vu", "role": "hocsinh", "password_hash": "hs_pwd", "hoten": "Vũ Đăng Khánh", "lop": "12C3"},
-                {"username": "ph_an_nguyen_bo", "role": "phuhuynh", "password_hash": "ph_pwd", "hoten": "Ông Nguyễn Văn Ba", "con_em": ["hs_an_nguyen"]},
-                {"username": "ph_binh_le_me", "role": "phuhuynh", "password_hash": "ph_pwd", "hoten": "Bà Lê Thị Tư", "con_em": ["hs_binh_le"]},
-                {"username": "ph_chi_tran_bo", "role": "phuhuynh", "password_hash": "ph_pwd", "hoten": "Ông Trần Văn Năm", "con_em": ["hs_chi_tran"]},
-                {"username": "ph_dung_pham_me", "role": "phuhuynh", "password_hash": "ph_pwd", "hoten": "Bà Phạm Thị Sáu", "con_em": ["hs_dung_pham"]},
-                {"username": "ph_giang_hoang_bo", "role": "phuhuynh", "password_hash": "ph_pwd", "hoten": "Ông Hoàng Văn Bảy", "con_em": ["hs_giang_hoang"]},
-                {"username": "ph_khanh_vu_me", "role": "phuhuynh", "password_hash": "ph_pwd", "hoten": "Bà Vũ Thị Tám", "con_em": ["hs_khanh_vu", "hs_an_nguyen"]}
-            ],
-            "messages": [
-                {"id": 1, "from_user": "gv_toan_thay_hung", "to_user": "ph_an_nguyen_bo", "content": "Xin chào anh Ba, mời anh tham dự buổi họp phụ huynh lớp 10A1 vào thứ 7 tuần này.", "timestamp": "2025-05-10 08:30:00", "read": false},
-                {"id": 2, "from_user": "ph_an_nguyen_bo", "to_user": "gv_toan_thay_hung", "content": "Cảm ơn thầy Hùng, tôi sẽ cố gắng tham dự.", "timestamp": "2025-05-10 09:15:00", "read": false},
-                {"id": 3, "from_user": "bgh_hieu_truong", "to_user": "gv_van_co_mai", "content": "Cô Mai vui lòng nộp báo cáo chuyên môn trước ngày 15/05.", "timestamp": "2025-05-11 10:00:00", "read": false},
-                {"id": 4, "from_user": "gv_van_co_mai", "to_user": "bgh_hieu_truong", "content": "Dạ vâng thưa thầy, tôi sẽ hoàn thành sớm ạ.", "timestamp": "2025-05-11 10:05:00", "read": false},
-                {"id": 5, "from_user": "hs_chi_tran", "to_user": "gv_van_co_mai", "content": "Thưa cô, em có câu hỏi về bài tập về nhà ạ.", "timestamp": "2025-05-12 14:20:00", "read": false},
-                {"id": 6, "from_user": "gv_anh_co_lan", "to_user": "ph_khanh_vu_me", "content": "Chào chị Tám, kết quả học tập môn Tiếng Anh của cháu Khánh rất tốt.", "timestamp": "2025-05-12 16:00:00", "read": false}
-            ],
-            "events": [
-                {"id": 1, "title": "Thông báo Nghỉ lễ Giỗ Tổ Hùng Vương", "date": "2025-04-18", "description": "Toàn thể học sinh, giáo viên được nghỉ lễ Giỗ Tổ Hùng Vương ngày 10/3 Âm lịch (tức 18/04/2025 Dương lịch).", "type": "thongbao_chung", "created_by": "bgh_hieu_truong", "timestamp": "2025-04-15 08:00:00"},
-                {"id": 2, "title": "Lịch thi học kỳ II Khối 10, 11", "date": "2025-05-19", "description": "Lịch thi chi tiết học kỳ II cho học sinh khối 10 và 11 sẽ diễn ra từ ngày 19/05 đến 24/05. Chi tiết xem tại bảng tin nhà trường.", "type": "event", "created_by": "bgh_hieu_truong", "timestamp": "2025-05-05 09:00:00"},
-                {"id": 3, "title": "Khen thưởng học sinh Nguyễn Văn An - Lớp 10A1", "date": "2025-05-10", "description": "Học sinh Nguyễn Văn An lớp 10A1 được tuyên dương vì đã đạt giải Nhất cuộc thi Học sinh Giỏi môn Toán cấp Thành phố.", "type": "khenthuong", "student_username": "hs_an_nguyen", "class_name": "10A1", "created_by": "gv_toan_thay_hung", "timestamp": "2025-05-10 10:00:00"},
-                {"id": 4, "title": "Hoạt động ngoại khóa: Tham quan Bảo tàng Lịch sử", "date": "2025-05-28", "description": "Tổ chức cho học sinh khối 11 tham quan Bảo tàng Lịch sử Quốc gia. Thời gian: 8h00 ngày 28/05. Phụ huynh đăng ký cho con em tại văn phòng Đoàn trường.", "type": "event", "created_by": "bgh_hieu_truong", "timestamp": "2025-05-12 11:00:00"},
-                {"id": 5, "title": "Kỷ luật học sinh Phạm Tuấn Dũng - Lớp 11B2", "date": "2025-05-08", "description": "Học sinh Phạm Tuấn Dũng lớp 11B2 bị kỷ luật cảnh cáo toàn trường do vi phạm nghiêm trọng nội quy về giờ giấc.", "type": "kyluat", "student_username": "hs_dung_pham", "class_name": "11B2", "created_by": "gv_van_co_mai", "timestamp": "2025-05-08 14:00:00"},
-                {"id": 6, "title": "Thông báo họp giáo viên toàn trường", "date": "2025-05-16", "description": "Kính mời toàn thể giáo viên tham dự buổi họp tổng kết tháng và triển khai công tác tháng mới. Thời gian: 15h00, Thứ Sáu ngày 16/05 tại Hội trường A.", "type": "thongbao_chung", "created_by": "bgh_hieu_truong", "timestamp": "2025-05-13 16:30:00"}
-            ],
-            "grades": {
-                "hs_an_nguyen": {
-                    "Toán": 9.5, "Vật Lý": 8.0, "Hóa Học": 8.5, "Ngữ Văn": 7.5, "Tiếng Anh": 9.0
-                },
-                "hs_binh_le": {
-                    "Toán": 7.0, "Vật Lý": 6.5, "Hóa Học": 7.0, "Ngữ Văn": 8.0, "Tiếng Anh": 7.5
-                },
-                "hs_chi_tran": {
-                    "Toán": 8.5, "Ngữ Văn": 9.0, "Tiếng Anh": 8.8, "Lịch Sử": 7.0, "Địa Lý": 7.5
-                },
-                "hs_dung_pham": {
-                    "Toán": 6.0, "Ngữ Văn": 6.5, "Tiếng Anh": 7.0, "Lịch Sử": 5.5, "Địa Lý": 6.0
-                },
-                "hs_giang_hoang": {
-                    "Tiếng Anh": 9.2, "Ngữ Văn": 8.0, "Toán": 7.5, "Sinh Học": 8.5, "GDCD": 9.0
-                },
-                "hs_khanh_vu": {
-                    "Tiếng Anh": 8.5, "Ngữ Văn": 7.0, "Toán": 8.0, "Sinh Học": 7.0, "GDCD": 8.0
-                }
-            },
-            "requests": [
-                {"id": 1, "from_user": "ph_an_nguyen_bo", "student_username": "hs_an_nguyen", "content": "Xin phép cho cháu An nghỉ học buổi chiều ngày 12/05/2025 để đi khám bệnh.", "status": "Đã duyệt", "reply": "Nhà trường đồng ý. Chúc cháu sớm khỏe.", "timestamp": "2025-05-11 08:00:00", "handler": "gv_toan_thay_hung", "handler_timestamp": "2025-05-11 09:30:00"},
-                {"id": 2, "from_user": "ph_chi_tran_bo", "student_username": "hs_chi_tran", "content": "Kính mong nhà trường xem xét về việc tăng cường thêm các buổi ôn tập môn Toán cho học sinh khối 11.", "status": "Đang xử lý", "reply": "Cảm ơn ý kiến của phụ huynh. Nhà trường sẽ xem xét và có phản hồi sớm.", "timestamp": "2025-05-12 10:15:00", "handler": "bgh_hieu_truong", "handler_timestamp": "2025-05-12 11:00:00"},
-                {"id": 3, "from_user": "ph_dung_pham_me", "student_username": "hs_dung_pham", "content": "Xin giải trình về việc cháu Dũng đi học muộn ngày 07/05/2025 do xe hỏng.", "status": "Chưa xử lý", "reply": "", "timestamp": "2025-05-09 07:30:00", "handler": null},
-                {"id": 4, "from_user": "ph_khanh_vu_me", "student_username": "hs_khanh_vu", "content": "Xin phép cho cháu Khánh được rút học bạ để chuyển trường.", "status": "Đã từ chối", "reply": "Vui lòng liên hệ trực tiếp văn phòng nhà trường để được hướng dẫn thủ tục chi tiết. Việc rút học bạ cần có lý do chính đáng và tuân thủ quy định.", "timestamp": "2025-04-20 14:00:00", "handler": "bgh_hieu_truong", "handler_timestamp": "2025-04-22 10:00:00"}
-            ],
-            "disciplinary_rewards": [
-                {"id": 1, "student_username": "hs_an_nguyen", "type": "khenthuong", "reason": "Đạt giải Nhất cuộc thi Học sinh Giỏi môn Toán cấp Thành phố.", "date": "2025-05-09", "decision_maker": "bgh_hieu_truong"},
-                {"id": 2, "student_username": "hs_giang_hoang", "type": "khenthuong", "reason": "Có nhiều đóng góp tích cực cho phong trào Đoàn trường.", "date": "2025-04-25", "decision_maker": "gv_anh_co_lan"},
-                {"id": 3, "student_username": "hs_dung_pham", "type": "kyluat", "reason": "Vi phạm nghiêm trọng nội quy về giờ giấc (đi học muộn nhiều lần).", "date": "2025-05-07", "decision_maker": "gv_van_co_mai"},
-                {"id": 4, "student_username": "hs_binh_le", "type": "khenthuong", "reason": "Tiến bộ vượt bậc trong học tập môn Ngữ Văn.", "date": "2025-05-12", "decision_maker": "gv_van_co_mai"}
-            ]
-        }
-        save_data(sample_data)
-        return sample_data
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+def get_user_details(username_or_id):
+    if isinstance(username_or_id, int):
+        return User.query.get(username_or_id)
+    return User.query.filter_by(username=username_or_id).first()
 
-# Hàm save_data không đổi
-def save_data(data):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-def get_user_details(username):
-    data = load_data()
-    for user in data['users']:
-        if user['username'] == username:
-            return user
-    return None
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form['username']
-        # Trong thực tế cần kiểm tra password hash
-        # For demo, chúng ta sẽ bỏ qua kiểm tra password và chỉ cần user tồn tại
-        data = load_data()
-        user_exists = False
-        user_role = None
-        for u in data['users']:
-            if u['username'] == username:
-                user_exists = True
-                user_role = u['role']
-                session['user_hoten'] = u.get('hoten', username) # Lấy họ tên
-                break
+        role_form = request.form['role']
+        user = User.query.filter_by(username=username).first()
 
-        if user_exists and request.form['role'] == user_role:
-            session['user'] = username
-            session['role'] = user_role
-            flash(f"Đăng nhập thành công với vai trò {user_role}!", "success")
+        if user and user.role == role_form:
+            session['user_id'] = user.id
+            session['user_username'] = user.username
+            session['user_hoten'] = user.hoten
+            session['role'] = user.role
+            flash(f"Đăng nhập thành công với vai trò {user.role}!", "success")
             return redirect(url_for('dashboard'))
         else:
             flash("Tên đăng nhập hoặc vai trò không đúng.", "danger")
@@ -128,237 +158,289 @@ def login():
 
 @app.route('/dashboard')
 def dashboard():
-    if 'user' not in session:
+    if 'user_id' not in session:
         return redirect(url_for('login'))
-    user_details = get_user_details(session['user'])
-    return render_template('dashboard.html', user=session.get('user_hoten', session['user']), role=session['role'], user_details=user_details)
+    current_user = User.query.get(session['user_id'])
+    if not current_user:
+        session.clear()
+        flash("Phiên đăng nhập không hợp lệ, vui lòng đăng nhập lại.", "warning")
+        return redirect(url_for('login'))
+    return render_template('dashboard.html', user_details=current_user)
+
 
 @app.route('/messages', methods=['GET', 'POST'])
-def messages_route(): 
-    if 'user' not in session:
+def messages_route():
+    if 'user_id' not in session:
         return redirect(url_for('login'))
+    current_user = User.query.get(session['user_id'])
 
-    data = load_data()
-
-    user_messages = [msg for msg in data.get('messages', []) if msg.get('to_user') == session['user'] or msg.get('from_user') == session['user']]
-    user_messages = sorted(user_messages, key=lambda x: x.get('timestamp', ''), reverse=True) # Sắp xếp tin nhắn mới nhất lên đầu
-
+    user_messages = Message.query.filter(
+        (Message.to_user_id == current_user.id) | (Message.from_user_id == current_user.id)
+    ).order_by(Message.timestamp.asc()).all() # Sắp xếp cũ nhất trước để hiển thị đúng thứ tự
 
     if request.method == 'POST':
-        to_user = request.form['to_user']
+        to_user_username = request.form['to_user']
         content = request.form['content']
+        recipient = User.query.filter_by(username=to_user_username).first()
 
-        recipient_exists = any(u['username'] == to_user for u in data['users'])
-        if not recipient_exists:
-            flash(f"Người dùng '{to_user}' không tồn tại.", "danger")
+        if not recipient:
+            flash(f"Người dùng '{to_user_username}' không tồn tại.", "danger")
+        elif recipient.id == current_user.id:
+            flash("Bạn không thể gửi tin nhắn cho chính mình.", "warning")
         else:
-            new_msg = {
-                "id": len(data['messages']) + 1,
-                "from_user": session['user'],
-                "to_user": to_user,
-                "content": content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "read": False
-            }
-            data['messages'].append(new_msg)
-            save_data(data)
+            new_msg = Message(
+                from_user_id=current_user.id,
+                to_user_id=recipient.id,
+                content=content
+            )
+            db.session.add(new_msg)
+            db.session.commit()
             flash("Tin nhắn đã được gửi!", "success")
-            return redirect(url_for('messages_route')) # Chuyển hướng sau khi POST để tránh gửi lại form
+            return redirect(url_for('messages_route'))
 
-    # Lấy danh sách người dùng để gợi ý người nhận (trừ chính mình)
-    # Đảm bảo data['users'] luôn tồn tại
-    users_for_messaging = [u for u in data.get('users', []) if u['username'] != session['user']]
+    users_for_messaging = User.query.filter(User.id != current_user.id).order_by(User.hoten).all()
 
     return render_template('messages.html',
                            messages=user_messages,
-                           current_user_hoten=session.get('user_hoten', session['user']),
-                           current_user_username=session['user'],
-                           users_for_messaging=users_for_messaging,
-                           get_user_details=get_user_details) # Truyền hàm get_user_details vào template
+                           current_user_hoten=current_user.hoten,
+                           current_user_id=current_user.id,
+                           users_for_messaging=users_for_messaging)
 
 
 @app.route('/events', methods=['GET', 'POST'])
-def events_route(): # Đổi tên hàm
-    if 'user' not in session:
+def events_route():
+    if 'user_id' not in session:
         return redirect(url_for('login'))
-    data = load_data() # Đảm bảo data được load
-    # Lọc sự kiện: BGH và GV thấy hết, PH và HS chỉ thấy sự kiện chung (hoặc liên quan đến lớp nếu có)
-    # Hiện tại demo sẽ cho tất cả user thấy tất cả sự kiện/thông báo
-    display_events = sorted(data.get('events', []), key=lambda x: x.get('date'), reverse=True)
+    current_user = User.query.get(session['user_id'])
 
-    if request.method == 'POST' and session['role'] in ['giaovien', 'truong']:
-        event_type = request.form.get('event_type', 'event') # Mặc định là event
-        new_event = {
-            "id": len(data['events']) + 1,
-            "title": request.form['title'],
-            "date": request.form['date'],
-            "description": request.form['description'],
-            "type": event_type, # Phân loại: event, khenthuong, kyluat, thongbao_chung
-            "created_by": session['user'],
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        if event_type in ['khenthuong', 'kyluat']:
-            new_event["student_username"] = request.form.get('student_username') # Cần form nhập tên HS
-            new_event["class_name"] = request.form.get('class_name') # Cần form nhập lớp
+    display_events = Event.query.order_by(Event.date.desc(), Event.timestamp.desc()).all()
 
-        data['events'].append(new_event)
+    if request.method == 'POST' and current_user.role in ['giaovien', 'truong']:
+        event_type = request.form.get('event_type', 'event')
+        try:
+            event_date_str = request.form['date']
+            if not event_date_str:
+                flash("Ngày không được để trống.", "danger")
+                return redirect(url_for('events_route'))
+            event_date = datetime.strptime(event_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            flash("Ngày không hợp lệ. Vui lòng nhập đúng định dạng YYYY-MM-DD.", "danger")
+            return redirect(url_for('events_route'))
 
-        # Nếu là khen thưởng/kỷ luật, cũng thêm vào mục disciplinary_rewards để dễ thống kê
-        if event_type in ['khenthuong', 'kyluat'] and new_event.get("student_username"):
-            dr_entry = {
-                "id": len(data.get('disciplinary_rewards', [])) + 1,
-                "student_username": new_event["student_username"],
-                "type": event_type,
-                "reason": new_event["description"], # Lấy mô tả làm lý do
-                "date": new_event["date"],
-                "decision_maker": session['user']
-            }
-            data.setdefault('disciplinary_rewards', []).append(dr_entry)
+        title = request.form.get('title')
+        description = request.form.get('description')
+        if not title or not description:
+            flash("Tiêu đề và nội dung không được để trống.", "danger")
+            return redirect(url_for('events_route'))
 
-        save_data(data)
-        flash("Sự kiện/Thông báo đã được thêm!", "success")
+        new_event = Event(
+            title=title,
+            date=event_date,
+            description=description,
+            type=event_type,
+            created_by_id=current_user.id
+        )
+        student_username_form = request.form.get('student_username')
+        if event_type in ['khenthuong', 'kyluat'] and student_username_form:
+            student_for_event = User.query.filter_by(username=student_username_form, role='hocsinh').first()
+            if student_for_event:
+                new_event.student_username = student_for_event.username
+                new_event.class_name = request.form.get('class_name') or student_for_event.lop
+
+                # Thêm vào DisciplinaryReward
+                dr_entry = DisciplinaryReward(
+                    student_id=student_for_event.id,
+                    type=event_type,
+                    reason=new_event.description,
+                    date=new_event.date,
+                    decision_maker_id=current_user.id
+                )
+                db.session.add(dr_entry)
+            else:
+                flash(f"Học sinh '{student_username_form}' không tìm thấy.", "warning")
+        elif event_type in ['khenthuong', 'kyluat'] and not student_username_form:
+             flash("Vui lòng chọn học sinh cho sự kiện khen thưởng/kỷ luật.", "warning")
+             # Không thêm event nếu thiếu thông tin quan trọng
+        else: # event, thongbao_chung
+            pass
+
+        if not (event_type in ['khenthuong', 'kyluat'] and not student_username_form): # Chỉ thêm nếu không phải lỗi thiếu HS
+            db.session.add(new_event)
+            db.session.commit()
+            flash("Sự kiện/Thông báo đã được thêm!", "success")
         return redirect(url_for('events_route'))
 
-    # Lấy danh sách học sinh để chọn cho khen thưởng/kỷ luật
-    students = [u for u in data.get('users',[]) if u['role'] == 'hocsinh'] 
+    students = User.query.filter_by(role='hocsinh').order_by(User.hoten).all()
 
     return render_template('events.html',
                            events=display_events,
-                           role=session['role'],
+                           role=current_user.role,
                            students=students,
                            get_user_details=get_user_details)
 
+
 @app.route('/grades', methods=['GET', 'POST'])
-def grades_route(): # Đổi tên hàm
-    if 'user' not in session:
+def grades_route():
+    if 'user_id' not in session:
         return redirect(url_for('login'))
-    data = load_data()
-    user_details = get_user_details(session['user'])
-    student_grades = {}
+    current_user = User.query.get(session['user_id'])
+    student_grades_display = {}
 
-    if session['role'] == 'hocsinh':
-        student_grades = {session['user']: data['grades'].get(session['user'], {})}
-    elif session['role'] == 'phuhuynh':
-        if user_details and 'con_em' in user_details:
-            for child_username in user_details['con_em']:
-                student_grades[child_username] = data['grades'].get(child_username, {})
-    elif session['role'] in ['giaovien', 'truong']: # GV, BGH xem được tất cả
-        student_grades = data['grades']
+    if current_user.role == 'hocsinh':
+        grades_for_student = Grade.query.filter_by(student_id=current_user.id).all()
+        student_grades_display[current_user.username] = {g.subject: g.score for g in grades_for_student}
+    elif current_user.role == 'phuhuynh':
+        children = current_user.get_children()
+        for child in children:
+            grades_for_child = Grade.query.filter_by(student_id=child.id).all()
+            student_grades_display[child.username] = {g.subject: g.score for g in grades_for_child}
+    elif current_user.role in ['giaovien', 'truong']:
+        all_students_with_grades = User.query.filter_by(role='hocsinh').outerjoin(Grade).all()
+        for s in all_students_with_grades:
+            student_grades_display[s.username] = {g.subject: g.score for g in s.grades}
 
 
-    if request.method == 'POST' and session['role'] == 'giaovien':
-        student_username = request.form['student_username']
-        subject = request.form['subject']
+    if request.method == 'POST' and current_user.role == 'giaovien':
+        student_username_form = request.form.get('student_username')
+        subject_form = request.form.get('subject')
+        score_str = request.form.get('score')
+
+        if not student_username_form or not subject_form or not score_str:
+            flash("Vui lòng điền đầy đủ thông tin học sinh, môn học và điểm.", "danger")
+            return redirect(url_for('grades_route'))
         try:
-            score = float(request.form['score'])
-            if not (0 <= score <= 10):
-                raise ValueError("Điểm không hợp lệ")
-        except ValueError:
-            flash("Điểm số không hợp lệ. Vui lòng nhập số từ 0 đến 10.", "danger")
+            score_form = float(score_str)
+            if not (0 <= score_form <= 10):
+                raise ValueError("Điểm phải từ 0 đến 10.")
+        except ValueError as e:
+            flash(f"Điểm số không hợp lệ: {e}", "danger")
             return redirect(url_for('grades_route'))
 
-        # Kiểm tra học sinh có tồn tại không
-        if not any(u['username'] == student_username and u['role'] == 'hocsinh' for u in data['users']):
-            flash(f"Học sinh '{student_username}' không tồn tại.", "danger")
+        student_to_grade = User.query.filter_by(username=student_username_form, role='hocsinh').first()
+        if not student_to_grade:
+            flash(f"Học sinh '{student_username_form}' không tồn tại.", "danger")
         else:
-            if student_username not in data['grades']:
-                data['grades'][student_username] = {}
-            data['grades'][student_username][subject] = score
-            save_data(data)
-            flash("Điểm đã được cập nhật!", "success")
+            existing_grade = Grade.query.filter_by(student_id=student_to_grade.id, subject=subject_form).first()
+            if existing_grade:
+                existing_grade.score = score_form
+                flash("Điểm đã được cập nhật!", "success")
+            else:
+                new_grade = Grade(student_id=student_to_grade.id, subject=subject_form, score=score_form)
+                db.session.add(new_grade)
+                flash("Điểm đã được thêm mới!", "success")
+            db.session.commit()
             return redirect(url_for('grades_route'))
 
-    # Lấy danh sách học sinh để giáo viên nhập điểm
-    students_list = [u for u in data['users'] if u['role'] == 'hocsinh']
-    return render_template('grades.html', grades_data=student_grades, role=session['role'], students_list=students_list, get_user_details=get_user_details)
+    students_list = User.query.filter_by(role='hocsinh').order_by(User.hoten).all()
+    return render_template('grades.html',
+                           grades_data=student_grades_display,
+                           role=current_user.role,
+                           session_user_username=current_user.username,
+                           students_list=students_list,
+                           get_user_details=get_user_details)
 
 
 @app.route('/requests', methods=['GET', 'POST'])
-def requests_view_route(): # Đổi tên hàm
-    if 'user' not in session:
+def requests_view_route():
+    if 'user_id' not in session:
         return redirect(url_for('login'))
-    data = load_data()
-    user_details = get_user_details(session['user'])
+    current_user = User.query.get(session['user_id'])
     display_requests = []
 
-    if session['role'] == 'phuhuynh':
-        display_requests = [req for req in data['requests'] if req.get('from_user') == session['user']]
-    elif session['role'] == 'giaovien':
-        # GV chủ nhiệm xem đơn của HS lớp mình, hoặc BGH xem tất cả (cần logic phức tạp hơn nếu theo ERD)
-        display_requests = data['requests'] # Đơn giản hóa: GV xem hết
-    elif session['role'] == 'truong':
-        display_requests = data['requests'] # BGH xem hết
+    if current_user.role == 'phuhuynh':
+        display_requests = Request.query.filter_by(from_user_id=current_user.id).order_by(Request.timestamp.desc()).all()
+    elif current_user.role == 'giaovien':
+        if current_user.lop_chunhiem:
+            student_ids_in_class = [s.id for s in User.query.filter_by(lop=current_user.lop_chunhiem, role='hocsinh').all()]
+            display_requests = Request.query.filter(Request.student_id.in_(student_ids_in_class)).order_by(Request.timestamp.desc()).all()
+        else:
+             display_requests = Request.query.filter(
+                (Request.status == 'Chưa xử lý') | (Request.handler_id == current_user.id) # GV xem đơn chưa xử lý hoặc đơn mình đã xử lý
+            ).order_by(Request.timestamp.desc()).all()
+    elif current_user.role == 'truong':
+        display_requests = Request.query.order_by(Request.timestamp.desc()).all()
 
     if request.method == 'POST':
-        if session['role'] == 'phuhuynh':
-            student_username = request.form.get('student_username') # PH cần chọn con nào
-            # Kiểm tra student_username có phải là con của phụ huynh này không
-            if not (user_details and student_username in user_details.get('con_em',[])):
-                flash("Bạn chỉ có thể gửi đơn cho con em của mình.", "danger")
+        if current_user.role == 'phuhuynh':
+            student_username_form = request.form.get('student_username')
+            content_form = request.form.get('content')
+
+            if not student_username_form or not content_form:
+                flash("Vui lòng chọn học sinh và nhập nội dung đơn.", "danger")
                 return redirect(url_for('requests_view_route'))
 
-            new_req = {
-                "id": len(data['requests']) + 1,
-                "from_user": session['user'],
-                "student_username": student_username,
-                "content": request.form['content'],
-                "status": "Chưa xử lý", # "Chưa xử lý", "Đang xử lý", "Đã duyệt", "Đã từ chối"
-                "reply": "",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "handler": None
-            }
-            data['requests'].append(new_req)
-            flash("Đơn đã được gửi!", "success")
-        elif session['role'] in ['giaovien', 'truong']:
-            req_id = int(request.form['req_id'])
-            reply_content = request.form.get('reply')
-            new_status = request.form.get('status')
+            student_for_request = User.query.filter_by(username=student_username_form, role='hocsinh').first()
+            is_child = False
+            if student_for_request and current_user.children_usernames:
+                if student_username_form in current_user.children_usernames.split(','):
+                    is_child = True
 
-            for req in data['requests']:
-                if req['id'] == req_id:
-                    if reply_content:
-                        req['reply'] = reply_content
-                    if new_status:
-                        req['status'] = new_status
-                    req['handler'] = session['user']
-                    req['handler_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    flash("Đơn đã được xử lý!", "success")
-                    break
-        save_data(data)
+            if not student_for_request or not is_child:
+                flash("Học sinh không hợp lệ hoặc không phải con em của bạn.", "danger")
+            else:
+                new_req_db = Request(
+                    from_user_id=current_user.id,
+                    student_id=student_for_request.id,
+                    content=content_form
+                )
+                db.session.add(new_req_db)
+                db.session.commit()
+                flash("Đơn đã được gửi!", "success")
+
+        elif current_user.role in ['giaovien', 'truong']:
+            req_id_form = request.form.get('req_id')
+            reply_content_form = request.form.get('reply')
+            new_status_form = request.form.get('status')
+
+            if not req_id_form or not new_status_form:
+                flash("Thiếu thông tin đơn hoặc trạng thái mới.", "danger")
+                return redirect(url_for('requests_view_route'))
+            try:
+                req_id_form = int(req_id_form)
+            except ValueError:
+                flash("ID đơn không hợp lệ.", "danger")
+                return redirect(url_for('requests_view_route'))
+
+
+            req_to_update = Request.query.get(req_id_form)
+            if req_to_update:
+                if reply_content_form: # Cho phép cập nhật reply trống
+                    req_to_update.reply = reply_content_form
+                req_to_update.status = new_status_form
+                req_to_update.handler_id = current_user.id
+                req_to_update.handler_timestamp = datetime.utcnow()
+                db.session.commit()
+                flash("Đơn đã được xử lý!", "success")
+            else:
+                flash("Không tìm thấy đơn yêu cầu.", "warning")
         return redirect(url_for('requests_view_route'))
 
-    # Lấy danh sách học sinh (con cái) cho phụ huynh chọn khi gửi đơn
     children_list = []
-    if session['role'] == 'phuhuynh' and user_details and 'con_em' in user_details:
-        children_list = [get_user_details(child_uname) for child_uname in user_details['con_em'] if get_user_details(child_uname)]
+    if current_user.role == 'phuhuynh':
+       children_list = current_user.get_children()
 
+    return render_template('requests.html',
+                           requests_data=display_requests,
+                           role=current_user.role,
+                           get_user_details=get_user_details,
+                           children_list=children_list)
 
-    return render_template('requests.html', requests_data=display_requests, role=session['role'], current_user=session['user'], children_list=children_list, get_user_details=get_user_details)
 
 @app.route('/statistics')
 def statistics():
-    if 'user' not in session or session['role'] not in ['giaovien', 'truong']:
+    if 'user_id' not in session or session['role'] not in ['giaovien', 'truong']:
         flash("Bạn không có quyền truy cập trang này.", "warning")
         return redirect(url_for('dashboard'))
 
-    data = load_data()
-    num_students = len([u for u in data['users'] if u['role'] == 'hocsinh'])
-    num_teachers = len([u for u in data['users'] if u['role'] == 'giaovien'])
-    num_requests_pending = len([r for r in data.get('requests', []) if r.get('status') == 'Chưa xử lý'])
-    num_events = len(data.get('events', []))
+    num_students = User.query.filter_by(role='hocsinh').count()
+    num_teachers = User.query.filter_by(role='giaovien').count()
+    num_requests_pending = Request.query.filter(Request.status.in_(['Chưa xử lý', 'Đang xử lý'])).count()
+    num_events = Event.query.count()
+    rewards_count = DisciplinaryReward.query.filter_by(type='khenthuong').count()
+    discipline_count = DisciplinaryReward.query.filter_by(type='kyluat').count()
 
-    # Thống kê khen thưởng/kỷ luật (đơn giản)
-    rewards_count = len([dr for dr in data.get('disciplinary_rewards', []) if dr.get('type') == 'khenthuong'])
-    discipline_count = len([dr for dr in data.get('disciplinary_rewards', []) if dr.get('type') == 'kyluat'])
-
-
-    # Thống kê điểm trung bình môn (ví dụ môn Toán)
-    # Cần logic phức tạp hơn nếu muốn tính theo lớp, theo kỳ
-    math_scores = []
-    for student, subjects in data.get('grades', {}).items():
-        if 'Toán' in subjects:
-            math_scores.append(subjects['Toán'])
-    avg_math_score = sum(math_scores) / len(math_scores) if math_scores else "N/A"
+    avg_math_score_query = db.session.query(func.avg(Grade.score)).filter(Grade.subject == 'Toán').scalar()
+    avg_math_score = round(avg_math_score_query, 2) if avg_math_score_query else "N/A"
 
     stats = {
         "num_students": num_students,
@@ -371,11 +453,157 @@ def statistics():
     }
     return render_template('statistics.html', stats=stats, role=session['role'])
 
+
 @app.route('/logout')
 def logout():
     session.clear()
     flash("Bạn đã đăng xuất.", "info")
     return redirect(url_for('login'))
 
+
+def init_db_and_migrate():
+    print("Khởi tạo cơ sở dữ liệu và di chuyển dữ liệu từ JSON...")
+    # db.drop_all() # 
+    db.create_all()
+
+    json_data_file = os.path.join(BASE_DIR, 'data.json')
+    if not os.path.exists(json_data_file):
+        print(f"Không tìm thấy file {json_data_file}. Bỏ qua migration.")
+        return
+
+    try:
+        with open(json_data_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Lỗi khi đọc data.json: {e}")
+        return
+
+    users_map = {}
+    print("Migrating Users...")
+    for u_data in data.get('users', []):
+        if not User.query.filter_by(username=u_data['username']).first():
+            user = User(
+                username=u_data['username'],
+                role=u_data['role'],
+                password_hash=u_data.get('password_hash', 'default_pwd_placeholder'),
+                hoten=u_data['hoten'],
+                lop_chunhiem=u_data.get('lop_chunhiem'),
+                lop=u_data.get('lop'),
+                children_usernames=",".join(u_data.get('con_em', [])) if u_data.get('con_em') else None
+            )
+            db.session.add(user)
+            try:
+                db.session.commit()
+                users_map[user.username] = user.id
+                print(f"  Added user: {user.username}")
+            except Exception as e_commit:
+                db.session.rollback()
+                print(f"  Error adding user {u_data['username']} on commit: {e_commit}")
+        else:
+            existing_user = User.query.filter_by(username=u_data['username']).first()
+            users_map[existing_user.username] = existing_user.id # Vẫn map user đã tồn tại
+            print(f"  User {u_data['username']} already exists.")
+
+
+    print("\nMigrating Messages...")
+    for m_data in data.get('messages', []):
+        from_user_id = users_map.get(m_data['from_user'])
+        to_user_id = users_map.get(m_data['to_user'])
+        if from_user_id and to_user_id:
+            msg_timestamp = datetime.strptime(m_data['timestamp'], "%Y-%m-%d %H:%M:%S")
+            if not Message.query.filter_by(from_user_id=from_user_id, to_user_id=to_user_id, timestamp=msg_timestamp).first():
+                msg = Message(
+                    from_user_id=from_user_id, to_user_id=to_user_id, content=m_data['content'],
+                    timestamp=msg_timestamp, read=m_data.get('read', False)
+                )
+                db.session.add(msg)
+                print(f"  Added message from {m_data['from_user']} to {m_data['to_user']}")
+        else:
+            print(f"  Skipping message: missing user for from_user='{m_data['from_user']}' or to_user='{m_data['to_user']}'")
+    db.session.commit()
+
+
+    print("\nMigrating Events...")
+    for e_data in data.get('events', []):
+        created_by_id = users_map.get(e_data['created_by'])
+        if created_by_id:
+            event_date = datetime.strptime(e_data['date'], "%Y-%m-%d").date()
+            event_timestamp = datetime.strptime(e_data['timestamp'], "%Y-%m-%d %H:%M:%S")
+            if not Event.query.filter_by(title=e_data['title'], date=event_date, created_by_id=created_by_id).first():
+                event = Event(
+                    title=e_data['title'], date=event_date, description=e_data['description'], type=e_data['type'],
+                    created_by_id=created_by_id, timestamp=event_timestamp,
+                    student_username=e_data.get('student_username'), class_name=e_data.get('class_name')
+                )
+                db.session.add(event)
+                print(f"  Added event: {event.title}")
+        else:
+            print(f"  Skipping event: missing creator_id for {e_data['created_by']}")
+    db.session.commit()
+
+    print("\nMigrating Grades...")
+    for student_username, subjects in data.get('grades', {}).items():
+        student_id = users_map.get(student_username)
+        if student_id:
+            for subject, score in subjects.items():
+                existing_grade = Grade.query.filter_by(student_id=student_id, subject=subject).first()
+                if not existing_grade:
+                    grade = Grade(student_id=student_id, subject=subject, score=score)
+                    db.session.add(grade)
+                    print(f"  Added grade for {student_username}: {subject} - {score}")
+                else: # Cập nhật điểm nếu đã có
+                    existing_grade.score = score
+                    print(f"  Updated grade for {student_username}: {subject} to {score}")
+        else:
+            print(f"  Skipping grades: missing student_id for {student_username}")
+    db.session.commit()
+
+    print("\nMigrating Requests...")
+    for r_data in data.get('requests', []):
+        from_user_id = users_map.get(r_data['from_user'])
+        student_id_req = users_map.get(r_data['student_username'])
+        handler_id_req = users_map.get(r_data['handler']) if r_data.get('handler') else None
+        if from_user_id and student_id_req:
+            req_timestamp = datetime.strptime(r_data['timestamp'], "%Y-%m-%d %H:%M:%S")
+            handler_ts_req = datetime.strptime(r_data['handler_timestamp'], "%Y-%m-%d %H:%M:%S") if r_data.get('handler_timestamp') else None
+            # Giả sử ID trong JSON không dùng để check, check dựa trên from, student, content, timestamp
+            if not Request.query.filter_by(from_user_id=from_user_id, student_id=student_id_req, content=r_data['content'], timestamp=req_timestamp).first():
+                req = Request(
+                    from_user_id=from_user_id, student_id=student_id_req, content=r_data['content'],
+                    status=r_data.get('status', "Chưa xử lý"), reply=r_data.get('reply'),
+                    timestamp=req_timestamp, handler_id=handler_id_req, handler_timestamp=handler_ts_req
+                )
+                db.session.add(req)
+                print(f"  Added request from {r_data['from_user']} for {r_data['student_username']}")
+        else:
+            print(f"  Skipping request: missing user for from_user='{r_data['from_user']}' or student='{r_data['student_username']}'")
+    db.session.commit()
+
+    print("\nMigrating Disciplinary Rewards...")
+    for dr_data in data.get('disciplinary_rewards', []):
+        student_id_dr = users_map.get(dr_data['student_username'])
+        decision_maker_id_dr = users_map.get(dr_data['decision_maker'])
+        if student_id_dr and decision_maker_id_dr:
+            dr_date = datetime.strptime(dr_data['date'], "%Y-%m-%d").date()
+            if not DisciplinaryReward.query.filter_by(student_id=student_id_dr, type=dr_data['type'], date=dr_date, decision_maker_id=decision_maker_id_dr).first():
+                dr = DisciplinaryReward(
+                    student_id=student_id_dr, type=dr_data['type'], reason=dr_data['reason'],
+                    date=dr_date, decision_maker_id=decision_maker_id_dr
+                )
+                db.session.add(dr)
+                print(f"  Added {dr_data['type']} for {dr_data['student_username']}")
+        else:
+            print(f"  Skipping disciplinary_reward: missing user for student='{dr_data['student_username']}' or decision_maker='{dr_data['decision_maker']}'")
+    db.session.commit()
+
+    print("\nDi chuyển dữ liệu hoàn tất!")
+
+
 if __name__ == '__main__':
+    db_file = os.path.join(BASE_DIR, 'school_data.db')
+    if not os.path.exists(db_file):
+        with app.app_context():
+            init_db_and_migrate()
+    else:
+        print("Database file đã tồn tại. Bỏ qua bước khởi tạo và di chuyển dữ liệu.")
     app.run(debug=True)

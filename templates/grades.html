@@ -9,7 +9,7 @@
 </div>
 
 {% if role == 'hocsinh' %}
-    {% set student_username = session.user %}
+    {% set student_username = session_user_username %} {# session_user_username được truyền từ app.py #}
     {% set student_info = get_user_details(student_username) %}
     {% if student_info and grades_data.get(student_username) %}
         <div class="card mb-3">
@@ -44,7 +44,7 @@
 {% elif role == 'phuhuynh' %}
     <h4>Điểm của con em:</h4>
     {% if grades_data %}
-        {% for student_username, subjects in grades_data.items() %}
+        {% for student_username, subjects in grades_data.items() %} {# grades_data là dict {username: {subject: score}} #}
             {% set student_info = get_user_details(student_username) %}
             <div class="card mb-3">
                 <div class="card-header">
@@ -82,15 +82,15 @@
         {% for student_username, subjects in grades_data.items() %}
             {% set student_info = get_user_details(student_username) %}
             <div class="card">
-                <div class="card-header" id="heading_{{ student_username }}">
+                <div class="card-header" id="heading_{{ student_username | replace('.', '_') | replace('@', '_') }}"> {# Đảm bảo ID hợp lệ #}
                     <h2 class="mb-0">
-                        <button class="btn btn-link btn-block text-left" type="button" data-toggle="collapse" data-target="#collapse_{{ student_username }}" aria-expanded="false" aria-controls="collapse_{{ student_username }}">
+                        <button class="btn btn-link btn-block text-left" type="button" data-toggle="collapse" data-target="#collapse_{{ student_username | replace('.', '_') | replace('@', '_') }}" aria-expanded="false" aria-controls="collapse_{{ student_username | replace('.', '_') | replace('@', '_') }}">
                             Học sinh: <strong>{{ student_info.hoten if student_info else student_username }}</strong>
                             {% if student_info and student_info.lop %} (Lớp: {{ student_info.lop }}) {% endif %}
                         </button>
                     </h2>
                 </div>
-                <div id="collapse_{{ student_username }}" class="collapse" aria-labelledby="heading_{{ student_username }}" data-parent="#gradesAccordion">
+                <div id="collapse_{{ student_username | replace('.', '_') | replace('@', '_') }}" class="collapse" aria-labelledby="heading_{{ student_username | replace('.', '_') | replace('@', '_') }}" data-parent="#gradesAccordion">
                     {% if subjects %}
                     <div class="card-body p-0">
                         <table class="table table-sm table-hover mb-0">
@@ -129,7 +129,7 @@
                 <label for="student_username_grade">Chọn học sinh:</label>
                 <select name="student_username" id="student_username_grade" class="form-control custom-select" required>
                     <option value="" disabled selected>-- Chọn học sinh --</option>
-                    {% for student in students_list %}
+                    {% for student in students_list %} {# students_list là list User objects #}
                     <option value="{{ student.username }}">{{ student.hoten }} ({{ student.username }}) - Lớp: {{student.lop or 'N/A'}}</option>
                     {% endfor %}
                 </select>

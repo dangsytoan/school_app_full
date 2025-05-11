@@ -8,26 +8,25 @@
     <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">Quay lại Dashboard</a>
 </div>
 
-
 <div class="row">
     <div class="col-md-8">
         <h4>Hộp thư của {{ current_user_hoten }}</h4>
-        <div class="card" style="max-height: 400px; overflow-y: auto;">
+        <div class="card" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column-reverse;"> {# Thêm display flex để tin nhắn mới nhất ở dưới cùng #}
             <div class="card-body">
                 {% if messages %}
-                    {% for m in messages %}
-                    <div class="message-bubble {% if m.from_user == current_user_username %}sent{% else %}received{% endif %}">
-                        {% if m.from_user == current_user_username %}
-                            <strong>Bạn gửi đến {{ get_user_details(m.to_user).hoten if get_user_details(m.to_user) else m.to_user }}:</strong>
+                    {% for m in messages %} {# messages được sort từ app.py, mới nhất đầu tiên, nhưng CSS sẽ đảo lại hiển thị #}
+                    <div class="message-bubble {% if m.from_user_id == current_user_id %}sent{% else %}received{% endif %}">
+                        {% if m.from_user_id == current_user_id %}
+                            <strong>Bạn gửi đến {{ m.recipient.hoten if m.recipient else 'N/A' }}:</strong>
                         {% else %}
-                            <strong>{{ get_user_details(m.from_user).hoten if get_user_details(m.from_user) else m.from_user }} gửi đến bạn:</strong>
+                            <strong>{{ m.sender.hoten if m.sender else 'N/A' }} gửi đến bạn:</strong>
                         {% endif %}
                         <p class="mb-0">{{ m.content }}</p>
-                        <div class="message-meta text-right">{{ m.timestamp }}</div>
+                        <div class="message-meta text-right">{{ m.timestamp.strftime('%Y-%m-%d %H:%M:%S') if m.timestamp else '' }}</div>
                     </div>
                     {% endfor %}
                 {% else %}
-                <p class="text-muted">Không có tin nhắn nào.</p>
+                <p class="text-muted text-center">Không có tin nhắn nào.</p>
                 {% endif %}
             </div>
         </div>
@@ -41,8 +40,8 @@
                         <label for="to_user">Người nhận:</label>
                         <select name="to_user" id="to_user" class="form-control custom-select" required>
                             <option value="" disabled selected>-- Chọn người nhận --</option>
-                            {% for u_details in users_for_messaging %}
-                            <option value="{{ u_details.username }}">{{ u_details.hoten }} ({{u_details.username}})</option>
+                            {% for u_details in users_for_messaging %} {# users_for_messaging là list User objects #}
+                            <option value="{{ u_details.username }}">{{ u_details.hoten }} ({{u_details.username}} - {{u_details.role | capitalize }})</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -56,4 +55,17 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    // Cuộn xuống dưới cùng của hộp chat khi tải trang hoặc có tin nhắn mới
+    document.addEventListener('DOMContentLoaded', function() {
+        var chatBox = document.querySelector('.card-body'); // Selector cho phần chứa tin nhắn
+        if(chatBox){
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    });
+</script>
 {% endblock %}

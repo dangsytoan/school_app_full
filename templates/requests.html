@@ -8,16 +8,15 @@
     <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">Quay lại Dashboard</a>
 </div>
 
-{% if requests_data %}
+{% if requests_data %} {# requests_data là list Request objects #}
     {% for req in requests_data %}
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span>
-                Đơn từ Phụ huynh: <strong>{{ get_user_details(req.from_user).hoten if get_user_details(req.from_user) else req.from_user }}</strong>
-                {% if req.student_username %}
-                    cho HS: <strong>{{ get_user_details(req.student_username).hoten if get_user_details(req.student_username) else req.student_username }}</strong>
-                    {% set student_details = get_user_details(req.student_username) %}
-                    {% if student_details and student_details.lop %} (Lớp: {{ student_details.lop }}) {% endif %}
+                Đơn từ Phụ huynh: <strong>{{ req.request_sender.hoten if req.request_sender else 'N/A' }}</strong>
+                {% if req.student %}
+                    cho HS: <strong>{{ req.student.hoten if req.student else 'N/A' }}</strong>
+                    {% if req.student.lop %} (Lớp: {{ req.student.lop }}) {% endif %}
                 {% endif %}
             </span>
             <span class="badge
@@ -31,23 +30,25 @@
         </div>
         <div class="card-body">
             <p class="card-text"><strong>Nội dung:</strong> {{ req.content }}</p>
-            <p class="card-text"><small class="text-muted">Ngày gửi: {{ req.timestamp }}</small></p>
+            <p class="card-text"><small class="text-muted">Ngày gửi: {{ req.timestamp.strftime('%Y-%m-%d %H:%M:%S') if req.timestamp }}</small></p>
 
-            {% if req.reply or (role in ['giaovien', 'truong'] and req.status == 'Chưa xử lý') or (role in ['giaovien', 'truong'] and req.status == 'Đang xử lý') %}
+            {% if req.reply or (role in ['giaovien', 'truong'] and (req.status == 'Chưa xử lý' or req.status == 'Đang xử lý')) %}
             <hr>
             <h5>Phản hồi:</h5>
             {% if req.reply %}
                 <p class="card-text">{{ req.reply }}</p>
-                {% if req.handler %}
-                <p><small class="text-muted">Người xử lý: {{ get_user_details(req.handler).hoten if get_user_details(req.handler) else req.handler }} lúc {{ req.handler_timestamp }}</small></p>
+                {% if req.request_handler %}
+                <p><small class="text-muted">Người xử lý: {{ req.request_handler.hoten if req.request_handler else 'N/A' }} lúc {{ req.handler_timestamp.strftime('%Y-%m-%d %H:%M:%S') if req.handler_timestamp }}</small></p>
                 {% endif %}
             {% else %}
+                {% if role in ['giaovien', 'truong'] %}
                 <p class="text-muted"><em>Chưa có phản hồi.</em></p>
+                {% endif %}
             {% endif %}
 
-            {% if role in ['giaovien', 'truong'] and (req.status == 'Chưa xử lý' or req.status == 'Đang xử lý') %}
+            {% if role in ['giaovien', 'truong'] and (req.status == 'Chưa xử lý' or req.status == 'Đang xử lý' or req.status == 'Đã duyệt' or req.status == 'Đã từ chối') %}
             <button class="btn btn-sm btn-outline-primary mt-2" type="button" data-toggle="collapse" data-target="#replyForm_{{ req.id }}" aria-expanded="false" aria-controls="replyForm_{{ req.id }}">
-                {% if req.status == 'Chưa xử lý' %}Phản hồi / Xử lý{% else %}Cập nhật xử lý{% endif %}
+                {% if req.status == 'Chưa xử lý' %}Phản hồi / Xử lý{% else %}Cập nhật xử lý/phản hồi{% endif %}
             </button>
             <div class="collapse mt-3" id="replyForm_{{ req.id }}">
                 <form method="POST">
@@ -87,8 +88,8 @@
                 <label for="student_username_req">Gửi cho con:</label>
                 <select name="student_username" id="student_username_req" class="form-control custom-select" required>
                     <option value="" disabled selected>-- Chọn học sinh --</option>
-                    {% for child in children_list %}
-                    <option value="{{ child.username }}">{{ child.hoten }} ({{ child.username }})</option>
+                    {% for child in children_list %} {# children_list là list User objects (con của phụ huynh) #}
+                    <option value="{{ child.username }}">{{ child.hoten }} ({{ child.username }}) - Lớp: {{child.lop or 'N/A'}}</option>
                     {% endfor %}
                 </select>
             </div>

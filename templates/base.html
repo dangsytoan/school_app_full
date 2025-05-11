@@ -1,18 +1,15 @@
 <!doctype html>
 <html lang="vi">
   <head>
-    <meta charset="utf- বাড়তি">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-
-
-    <title>{% block title %}Hệ thống Liên lạc{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"> <title>{% block title %}Hệ thống Liên lạc{% endblock %}</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa; /* Màu nền nhẹ nhàng */
+            background-color: #f8f9fa;
         }
         .navbar {
             margin-bottom: 20px;
@@ -93,7 +90,7 @@
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav mr-auto">
-          {% if session.user %}
+          {% if session.user_id %} {# Kiểm tra user_id thay vì user #}
             <li class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
               <a class="nav-link" href="{{ url_for('dashboard') }}">Bảng điều khiển</a>
             </li>
@@ -117,10 +114,10 @@
           {% endif %}
         </ul>
         <ul class="navbar-nav">
-            {% if session.user %}
+            {% if session.user_id %} {# Kiểm tra user_id #}
               <li class="nav-item">
                 <span class="navbar-text mr-3">
-                  Chào, {{ session.user_hoten }} ({{ session.role }})
+                  Chào, {{ session.user_hoten }} ({{ session.role | capitalize }})
                 </span>
               </li>
               <li class="nav-item">

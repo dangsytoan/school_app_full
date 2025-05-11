@@ -10,7 +10,7 @@
        source venv/bin/activate (Linux/macOS)
 
 3. Cài Flask:
-       pip install flask
+       pip install Flask Flask-SQLAlchemy SQLAlchemy
 
 4. Chạy ứng dụng:
        python app.py
